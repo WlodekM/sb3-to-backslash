@@ -63,9 +63,18 @@ export interface Block {
     fields: any
     shadow: boolean
     topLevel: boolean
-    mutation?: any
     x?: number
     y?: number
+    mutation?: {
+        tagName?: "mutation"
+        children?: unknown[]
+        proccode?: string
+        argumentids?: string
+        warp?: ("true" | "false" | "null") | boolean | null
+        hasnext?: ("true" | "false" | "null") | boolean | null
+        argumentnames: string
+        [k: string]: unknown
+    }
 }
 
 export type Inputs = Record<string, Input>
