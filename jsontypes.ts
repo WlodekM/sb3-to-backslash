@@ -399,5 +399,6 @@ export interface Project {
             [k: string]: unknown
         })[]
     ]
-    [k: string]: unknown
+    [k: string]: unknown,
+    extensionURLs?: Record<string, string>
 }
