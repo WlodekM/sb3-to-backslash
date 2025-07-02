@@ -3,3 +3,4 @@ TestProject
 *.sb3
 deno.lock
 node_modules
+targets

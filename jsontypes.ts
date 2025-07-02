@@ -410,4 +410,5 @@ export interface Project {
     ]
     [k: string]: unknown,
     extensionURLs?: Record<string, string>
+    extensions?: string[]
 }

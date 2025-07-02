@@ -2,6 +2,7 @@
 import { jsonBlock, Project, blockBlock, varBlock } from "./jsontypes.ts";
 import definitions, { Input } from "./blocks.ts";
 import decompress from "decompress";
+import fs from "node:fs"
 await decompress('domestique client.sb3', 'TestProject', {})
 const projectJson: Project = JSON.parse(Deno.readTextFileSync('TestProject/project.json'));
 
@@ -168,31 +169,145 @@ async function importExtension(url: string) {
 	}
 }
 
+async function importDefaultExtension(id: string) {
+	const nop = () => { };
+	let ext: any = null;
+	//@ts-ignore:
+	const Scratch = globalThis.Scratch = {
+		translate: (a: string) => a,
+		extensions: {
+			unsandboxed: true,
+			register: (e: Class) => { ext = e }
+		},
+		vm: {
+			runtime: {
+				on: nop
+			}
+		},
+		BlockType: {
+			BOOLEAN: "Boolean",
+			BUTTON: "button",
+			LABEL: "label",
+			COMMAND: "command",
+			CONDITIONAL: "conditional",
+			EVENT: "event",
+			HAT: "hat",
+			LOOP: "loop",
+			REPORTER: "reporter",
+			XML: "xml"
+		},
+		TargetType: {
+			SPRITE: "sprite",
+			STAGE: "stage"
+		},
+		Cast,
+		ArgumentType: {
+			ANGLE: "angle",
+			BOOLEAN: "Boolean",
+			COLOR: "color",
+			NUMBER: "number",
+			STRING: "string",
+			MATRIX: "matrix",
+			NOTE: "note",
+			IMAGE: "image",
+			COSTUME: "costume",
+			SOUND: "sound"
+		}
+	}
+	//@ts-ignore:
+	globalThis.module = {}
+	const _ArgumentType = await import('./tw-vm/src/extension-support/argument-type.js');
+	//@ts-ignore
+	const ArgumentType = _ArgumentType ?? module.exports;
+	const _BlockType = await import('./tw-vm/src/extension-support/block-type.js');
+	//@ts-ignore
+	const BlockType = _BlockType ?? module.exports;
+	const _TargetType = await import('./tw-vm/src/extension-support/target-type.js');
+	//@ts-ignore
+	const TargetType = _TargetType ?? module.exports;
+	//@ts-ignore:
+	Scratch.translate.setup = nop
+	//@ts-ignore:
+	globalThis.require = (moduleName) => {
+		if (moduleName == 'format-message')
+			return (message: {default: string}) => message.default;
+		switch (moduleName) {
+			case '../../extension-support/argument-type':
+				return ArgumentType;
+			case '../../extension-support/block-type':
+				return BlockType
+			case '../../extension-support/target-type':
+				return TargetType
+		}
+		return undefined
+	}
+	let path = fs.existsSync(`./tw-vm/src/extensions/${id}/index.js`) ?
+		`./tw-vm/src/extensions/${id}/index.js` :
+		fs.existsSync(`./tw-vm/src/extensions/scratch3_${id}/index.js`) ?
+		`./tw-vm/src/extensions/scratch3_${id}/index.js` :
+		`./tw-vm/src/extensions/${id}/index.js`
+	await import(path);
+	//@ts-ignore
+	ext = new globalThis.module.exports(Scratch.vm.runtime);
+	
+	if (ext == null || !ext?.getInfo) throw "Extension didnt load properly";
+	const { blocks, id: extid } = ext.getInfo();
+
+	blockDefinitions = {
+		...blockDefinitions,
+		...Object.fromEntries(
+			blocks.map((block: any) => {
+				if (typeof block !== 'object' || !block.opcode)
+					return [];
+				return [extid + '_' + block.opcode, [Object.entries(block.arguments ?? {}).map(a => {
+					return {
+						name: a[0],
+						type: 1
+					} as Input
+				}), block.blockType == Scratch.BlockType.EVENT ? 'hat' : 'reporter']]
+			})
+		)
+	}
+}
+
 function stringifyInputs(scope: Scope, block: blockBlock, definition: definition, blockse: Record<string, jsonBlock>): string {
 	// console.log(`strInputs ${block.opcode}`)
 	const result: string[] = []
 	for (const input of definition[0]) {
 		// console.log(input.name, block.inputs[input.name])
-		if (!block.inputs[input.name])
+		if (!block.inputs[input.name] && !block.fields[input.name])
 			continue;
 		const inputData = block.inputs[input.name];
+		if (!inputData && block.fields[input.name]) {
+			result.push(`"${String(block.fields[input.name][0]).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
+			continue;
+		}
 		const inputInput: [number, string] | string = inputData[1];
 		if (typeof inputInput == 'string') {
 			const iBlock = blockse[inputInput] as jsonBlock as blockBlock;
 			result.push(getReporterBlock(scope, iBlock, blockDefinitions[iBlock.opcode], blockse, 0));
 			continue;
 		}
-		if (inputInput[0] == 4 ||
-			inputInput[0] == 5 ||
-			inputInput[0] == 6 ||
-			inputInput[0] == 7 ||
-			inputInput[0] == 8
+		if (inputInput[0] == InputTypes.math_number ||
+			inputInput[0] == InputTypes.math_positive_number ||
+			inputInput[0] == InputTypes.math_whole_number ||
+			inputInput[0] == InputTypes.math_integer ||
+			inputInput[0] == InputTypes.math_angle
 		) {
 			result.push(String(inputInput[1]))
 			continue;
 		}
-		if (inputInput[0] == 10) {
+		if (inputInput[0] == InputTypes.text ||
+			inputInput[0] == InputTypes.colour_picker) {
 			result.push(`"${String(inputInput[1]).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
+			continue;
+		}
+		if (inputInput[0] == InputTypes.data_variable) {
+			result.push(`${inputInput[1]}`)
+			continue;
+		}
+		if (inputInput[0] == InputTypes.event_broadcast_menu) {
+			result.push(`"${inputInput[1].replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
 			continue;
 		}
 		console.error(`INPUT TYPE ${inputInput[0]} NOT IMPLEMENTED`)
@@ -253,6 +368,8 @@ function getReporterBlock(scope: Scope, block: blockBlock, definition: definitio
 				scope.vars[block.fields.VARIABLE[1]] = block.fields.VARIABLE[0];
 			return doNext(`${pre}${block.fields.VARIABLE[0].replaceAll(' ', '_')} = ${stringifyInputs(scope, block, [[{name: 'VALUE', type: 1}], 'reporter'], blockse)}`)
 	}
+	if (block.opcode.includes("_menu_"))
+		return doNext(`"${(Object.values(block.fields) as [string, ...any[]][])[0][0].replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
 	if (!definition) {
 		console.error(`undefined definition for ${block.opcode}`)
 		return doNext(`/* undefined definition for ${block.opcode} */`)
@@ -306,7 +423,15 @@ for (const extId in projectJson.extensionURLs) {
 	await importExtension(String(url));
 }
 
+for (const extId of projectJson.extensions ?? []) {
+	if ((projectJson.extensionURLs ?? {})[extId])
+		continue;
+	await importDefaultExtension(extId)
+}
+
+let i = 0
 for (const target of projectJson.targets) {
+	Deno.writeTextFileSync(`targets/${i}.json`, JSON.stringify(target.blocks))
 	const scope = new Scope()
 	scope.spriteVariables = target.variables
 	let code = '#include <"blocks/js" "base.js">';
@@ -344,4 +469,5 @@ for (const target of projectJson.targets) {
 		}
 	}
 	Deno.writeTextFileSync(`out/${target.name}.bsl`, code)
+	i++
 }

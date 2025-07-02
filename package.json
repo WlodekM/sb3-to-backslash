@@ -1,5 +1,6 @@
 {
 	"dependencies": {
+		"@types/node": "^24.0.10",
 		"decompress": "^4.2.1"
 	}
 }
