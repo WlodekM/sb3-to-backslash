@@ -3,6 +3,7 @@ export interface Input {
     name: string,
     type: number
 }
+const blocksDir = 'pm-blocks'
 
 //@ts-ignore: goog...
 globalThis.goog = {
@@ -39,21 +40,21 @@ globalThis.Blockly = {
     FieldDropdown: class FieldDropdown {}
 };
 
-await import('./tw-blocks/msg/js/en.js');
+await import(`./${blocksDir}/msg/js/en.js`);
 
-await import('./tw-blocks/core/constants.js');
-await import('./tw-blocks/core/colours.js');
+await import(`./${blocksDir}/core/constants.js`);
+await import(`./${blocksDir}/core/colours.js`);
 
 export const blockly = Blockly
 
-await import('./tw-blocks/blocks_vertical/control.js');
-await import('./tw-blocks/blocks_vertical/event.js');
-await import('./tw-blocks/blocks_vertical/looks.js');
-await import('./tw-blocks/blocks_vertical/motion.js');
-await import('./tw-blocks/blocks_vertical/operators.js');
-await import('./tw-blocks/blocks_vertical/sound.js');
-await import('./tw-blocks/blocks_vertical/sensing.js');
-await import('./tw-blocks/blocks_vertical/data.js');
+await import(`./${blocksDir}/blocks_vertical/control.js`);
+await import(`./${blocksDir}/blocks_vertical/event.js`);
+await import(`./${blocksDir}/blocks_vertical/looks.js`);
+await import(`./${blocksDir}/blocks_vertical/motion.js`);
+await import(`./${blocksDir}/blocks_vertical/operators.js`);
+await import(`./${blocksDir}/blocks_vertical/sound.js`);
+await import(`./${blocksDir}/blocks_vertical/sensing.js`);
+await import(`./${blocksDir}/blocks_vertical/data.js`);
 
 // this is used for custom blocks
 // await import('./tw-blocks/blocks_vertical/procedures.js');

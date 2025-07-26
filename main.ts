@@ -3,8 +3,10 @@ import { jsonBlock, Project, blockBlock, varBlock } from "./jsontypes.ts";
 import definitions, { Input } from "./blocks.ts";
 import decompress from "decompress";
 import fs from "node:fs"
-await decompress('domestique client.sb3', 'TestProject', {})
+await decompress('TeamCrateBoxTWO.pmp', 'TestProject', {})
 const projectJson: Project = JSON.parse(Deno.readTextFileSync('TestProject/project.json'));
+
+const vmDir = 'pm-vm'
 
 type definition = [Input[], string] | [Input[], 'branch', string[]]
 
@@ -78,8 +80,13 @@ async function importExtension(url: string) {
 	// deno-lint-ignore no-explicit-any
 	let ext: any = null;
 	//@ts-ignore:
+	globalThis.MutationObserver = class {
+		observe() {}
+	}
+	//@ts-ignore:
 	const Scratch = globalThis.Scratch = {
 		translate: (a: string) => a,
+		fetch,
 		extensions: {
 			unsandboxed: true,
 			register: (e: Class) => { ext = e }
@@ -89,11 +96,23 @@ async function importExtension(url: string) {
 				on: nop,
 				targets: [],
 				ioDevices: {
-					userData: {}
-				}
+					userData: {},
+					mouse: {
+						bindToCamera: nop
+					}
+				},
+				frameLoop: {
+					framerate: 0
+				},
+				exports: {},
+				setRuntimeOptions: nop
 			},
 			renderer: {
 				on: nop,
+				exports: {
+					Skin: class {}
+				},
+				canvas: {},
 			},
 			exports: {
 				RenderedTarget: class RenderedTarget {
@@ -118,6 +137,9 @@ async function importExtension(url: string) {
 		TargetType: {
 			SPRITE: "sprite",
 			STAGE: "stage"
+		},
+		renderer: {
+			canvas: {},
 		},
 		Cast,
 		ArgumentType: {
@@ -181,7 +203,18 @@ async function importDefaultExtension(id: string) {
 		},
 		vm: {
 			runtime: {
-				on: nop
+				on: nop,
+				frameLoop: {
+					framerate: 0
+				},
+				ioDevices: {
+					userData: {},
+					mouse: {
+						bindToCamera: nop
+					}
+				},
+				registerCompiledExtensionBlocks: nop,
+				setRuntimeOptions: nop
 			}
 		},
 		BlockType: {
@@ -215,14 +248,16 @@ async function importDefaultExtension(id: string) {
 		}
 	}
 	//@ts-ignore:
+	globalThis.vm = Scratch.vm;
+	//@ts-ignore:
 	globalThis.module = {}
-	const _ArgumentType = await import('./tw-vm/src/extension-support/argument-type.js');
+	const _ArgumentType = await import(`./${vmDir}/src/extension-support/argument-type.js`);
 	//@ts-ignore
 	const ArgumentType = _ArgumentType ?? module.exports;
-	const _BlockType = await import('./tw-vm/src/extension-support/block-type.js');
+	const _BlockType = await import(`./${vmDir}/src/extension-support/block-type.js`);
 	//@ts-ignore
 	const BlockType = _BlockType ?? module.exports;
-	const _TargetType = await import('./tw-vm/src/extension-support/target-type.js');
+	const _TargetType = await import(`./${vmDir}/src/extension-support/target-type.js`);
 	//@ts-ignore
 	const TargetType = _TargetType ?? module.exports;
 	//@ts-ignore:
@@ -237,16 +272,50 @@ async function importDefaultExtension(id: string) {
 			case '../../extension-support/block-type':
 				return BlockType
 			case '../../extension-support/target-type':
-				return TargetType
+				return TargetType;
+			case '../../extension-support/tw-l10n':
+				return ()=>Scratch.translate;
 		}
-		return undefined
+		return class {}
 	}
-	let path = fs.existsSync(`./tw-vm/src/extensions/${id}/index.js`) ?
-		`./tw-vm/src/extensions/${id}/index.js` :
-		fs.existsSync(`./tw-vm/src/extensions/scratch3_${id}/index.js`) ?
-		`./tw-vm/src/extensions/scratch3_${id}/index.js` :
-		`./tw-vm/src/extensions/${id}/index.js`
-	await import(path);
+	const dir = id == 'lmsTempVars2' ? 'lily_tempVars2' : id;
+	// console.log(dir, dir.match(/^jg[A-Z]/), dir.replace(/^jg([A-Z])/,(_,l)=>'jg_'+l.toLowerCase()),
+	// 	dir.replace(/^jg([A-Z])/,(_,l)=>'jg_'+l))
+	let path = fs.existsSync(`./${vmDir}/src/extensions/${dir}/index.js`) ?
+		`./${vmDir}/src/extensions/${dir}/index.js` :
+		fs.existsSync(`./${vmDir}/src/extensions/scratch3_${dir}/index.js`) ?
+		`./${vmDir}/src/extensions/scratch3_${dir}/index.js` :
+		dir.match(/^jw[A-Z]/) && 
+		fs.existsSync(`./${vmDir}/src/extensions/${
+			dir.replace(/^jw([A-Z])/,(_,l)=>'jw_'+l.toLowerCase())}/index.js`) ?
+		`./${vmDir}/src/extensions/${
+			dir.replace(/^jw([A-Z])/,(_,l)=>'jw_'+l.toLowerCase())
+		}/index.js` :
+		dir.match(/^pm[A-Z]/) && 
+		fs.existsSync(`./${vmDir}/src/extensions/${
+			dir.replace(/^pm([A-Z])/,(_,l)=>'pm_'+l.toLowerCase())}/index.js`) ?
+		`./${vmDir}/src/extensions/${
+			dir.replace(/^pm([A-Z])/,(_,l)=>'pm_'+l.toLowerCase())
+		}/index.js` :
+		dir.match(/^jg[A-Z]/) && 
+		fs.existsSync(`./${vmDir}/src/extensions/${
+			dir.replace(/^jg([A-Z])/,(_,l)=>'jg_'+l).toLowerCase()}/index.js`) ?
+		`./${vmDir}/src/extensions/${
+			dir.replace(/^jg([A-Z])/,(_,l)=>'jg_'+l).toLowerCase()
+		}/index.js` :
+		dir.match(/^jg[A-Z]/) && 
+		fs.existsSync(`./${vmDir}/src/extensions/${
+			dir.replace(/^jg([A-Z])/,(_,l)=>'jg_'+l.toLowerCase())}/index.js`) ?
+		`./${vmDir}/src/extensions/${
+			dir.replace(/^jg([A-Z])/,(_,l)=>'jg_'+l.toLowerCase())
+		}/index.js` :
+		`./${vmDir}/src/extensions/${dir}/index.js`;
+	try {
+		await import(path);
+	} catch (error) {
+		console.error('couldnt load', path);
+		throw error
+	}
 	//@ts-ignore
 	ext = new globalThis.module.exports(Scratch.vm.runtime);
 	
@@ -268,6 +337,10 @@ async function importDefaultExtension(id: string) {
 			})
 		)
 	}
+}
+
+function sanitizeVar(varname: string) {
+	return varname.replaceAll(' ', '_').replaceAll('(', '_').replaceAll(')', '_').replaceAll('\n', '_').replaceAll('"', '_').replaceAll('.', '_')
 }
 
 function stringifyInputs(scope: Scope, block: blockBlock, definition: definition, blockse: Record<string, jsonBlock>): string {
@@ -303,7 +376,7 @@ function stringifyInputs(scope: Scope, block: blockBlock, definition: definition
 			continue;
 		}
 		if (inputInput[0] == InputTypes.data_variable) {
-			result.push(`${inputInput[1]}`)
+			result.push(`${sanitizeVar(inputInput[1])}`)
 			continue;
 		}
 		if (inputInput[0] == InputTypes.event_broadcast_menu) {
@@ -337,6 +410,15 @@ function getBranchBlock(scope: Scope, block: blockBlock, definition: [Input[], "
 function getReporterBlock(scope: Scope, block: blockBlock, definition: definition, blockse: Record<string, jsonBlock>, level: number, ignoreBranch: boolean = false, next = true): string {
 	// console.log(`reporterBlock`, block.opcode, level)
 	switch (block.opcode) {
+		case 'operator_notequal':
+			return doNext(`${stringifyInputs(scope, block, [
+				[
+					{name:'OPERAND1',type:1},
+					{name:'OPERAND2',type:1}
+				],'reporter'
+			], blockse).replace(', ', ' !=')}`)
+		case 'procedures_return':
+			return doNext(`return ${stringifyInputs(scope, block, [[{name:'return',type:1}],'reporter'], blockse)}`)
 		case 'procedures_call':
 			// console.log(block.mutation?.proccode)
 			if (block.mutation?.proccode == '​​log​​ %s')
@@ -366,7 +448,7 @@ function getReporterBlock(scope: Scope, block: blockBlock, definition: definitio
 			const pre = definedAlready ? '' : `${scope.spriteVariables[block.fields.VARIABLE[1]] ? '' : 'global '}var `;
 			if (!definedAlready)
 				scope.vars[block.fields.VARIABLE[1]] = block.fields.VARIABLE[0];
-			return doNext(`${pre}${block.fields.VARIABLE[0].replaceAll(' ', '_')} = ${stringifyInputs(scope, block, [[{name: 'VALUE', type: 1}], 'reporter'], blockse)}`)
+			return doNext(`${pre}${sanitizeVar(block.fields.VARIABLE[0])} = ${stringifyInputs(scope, block, [[{name: 'VALUE', type: 1}], 'reporter'], blockse)}`)
 	}
 	if (block.opcode.includes("_menu_"))
 		return doNext(`"${(Object.values(block.fields) as [string, ...any[]][])[0][0].replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
@@ -393,9 +475,7 @@ ${block.next ? getReporterBlock(scope, blockse[block.next] as blockBlock, blockD
 }`
 }
 
-function getFnDecl(scope: Scope, block: blockBlock, blockse: Record<string, jsonBlock>, level: number = 0): string {
-	if (!block.inputs.custom_block || typeof block.inputs.custom_block[1] != 'string')
-		throw 'what the shit where the fuck did you get this sb3 from';
+function preprocessFnDecl(scope: Scope, block: blockBlock, blockse: Record<string, jsonBlock>): Scope {
 	const prototype: blockBlock = blockse[block.inputs.custom_block[1]] as blockBlock;
 	if (!prototype.mutation || !prototype.mutation.proccode || typeof prototype.mutation.proccode != 'string' || !prototype.mutation.argumentnames)
 		throw 'what the shit where the fuck did you get this sb3 from'
@@ -406,6 +486,16 @@ function getFnDecl(scope: Scope, block: blockBlock, blockse: Record<string, json
 		name,
 		arguments: JSON.parse(prototype.mutation.argumentids ?? '[]')
 	}
+	// console.log('!!', prototype.mutation.proccode, scope.customBlocks[prototype.mutation.proccode])
+	return scope;
+}
+
+function getFnDecl(scope: Scope, block: blockBlock, blockse: Record<string, jsonBlock>, level: number = 0): string {
+	if (!block.inputs.custom_block || typeof block.inputs.custom_block[1] != 'string')
+		throw 'what the shit where the fuck did you get this sb3 from';
+	const prototype: blockBlock = blockse[block.inputs.custom_block[1]] as blockBlock;
+	if (!prototype.mutation || !prototype.mutation.proccode || typeof prototype.mutation.proccode != 'string' || !prototype.mutation.argumentnames)
+		throw 'what the shit where the fuck did you get this sb3 from'
 	const newScope = fromScope(scope);
 	const names = JSON.parse(prototype.mutation.argumentnames ?? '[]')
 	newScope.customBlockArgs = Object.fromEntries(
@@ -432,9 +522,43 @@ for (const extId of projectJson.extensions ?? []) {
 let i = 0
 for (const target of projectJson.targets) {
 	Deno.writeTextFileSync(`targets/${i}.json`, JSON.stringify(target.blocks))
-	const scope = new Scope()
+	let scope = new Scope()
 	scope.spriteVariables = target.variables
-	let code = '#include <"blocks/js" "base.js">';
+	let code = `#include <"blocks/js" "base.js">`;
+	for (const id in target.variables) {
+		const variable = target.variables[id];
+		const value = variable[1] ?? 0;
+		console.log([
+			typeof value == 'number' ?
+				InputTypes.math_number :
+				InputTypes.text,
+			value
+		])
+		code += getReporterBlock(
+			scope,
+			{
+				fields: {
+					VARIABLE: [id, variable[0]]
+				},
+				inputs: {
+					VALUE: [
+						typeof value == 'number' ?
+							InputTypes.math_number :
+							InputTypes.text,
+						value
+					]
+				},
+				next: null,
+				topLevel: true,
+				opcode: 'data_setvariableto',
+				parent: null,
+				shadow: false,
+			},
+			blockDefinitions['data_setvariableto'],
+			target.blocks as Record<string, jsonBlock>,
+			0
+		)
+	}
 	const topLevelBlocks = Object.entries(target.blocks as Record<string, jsonBlock> ?? {})
 		.filter(([_, block]: [string, jsonBlock]) => !Array.isArray(block as varBlock) && (block as blockBlock).topLevel)
 		.sort(([_, a], [__, b]) => 
@@ -451,10 +575,21 @@ for (const target of projectJson.targets) {
 	for (const [_id, block] of topLevelBlocks) {
 		if (Array.isArray(block))
 			continue;
+		if (block.opcode != 'procedures_definition' &&
+			block.opcode !== 'procedures_definition_return') //<--
+			continue;
+		// console.log('uh yea')
+		scope = preprocessFnDecl(scope, block as jsonBlock as blockBlock, target.blocks as Record<string, jsonBlock>)
+	}
+	// console.log('oh were doingthis now ok')
+	for (const [_id, block] of topLevelBlocks) {
+		if (Array.isArray(block))
+			continue;
 		if (block.opcode == 'argument_reporter_boolean' ||
 			block.opcode == 'argument_reporter_string_number')
 			continue;
-		if (block.opcode == 'procedures_definition') {
+		if (block.opcode == 'procedures_definition' ||
+			block.opcode == 'procedures_definition_return') {
 			code += getFnDecl(scope, block as jsonBlock as blockBlock, target.blocks as Record<string, jsonBlock>)
 			continue;
 		}
@@ -468,6 +603,6 @@ for (const target of projectJson.targets) {
 			code += getHatBlock(scope, block as jsonBlock as blockBlock, definition, target.blocks as Record<string, jsonBlock>)
 		}
 	}
-	Deno.writeTextFileSync(`out/${target.name}.bsl`, code)
+	Deno.writeTextFileSync(`out/${target.name.replaceAll('/','_')}.bsl`, code)
 	i++
 }

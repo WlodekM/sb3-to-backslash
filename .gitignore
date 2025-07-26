@@ -4,3 +4,6 @@ TestProject
 deno.lock
 node_modules
 targets
+pm-vm
+pm-blocks
+*.pmp
