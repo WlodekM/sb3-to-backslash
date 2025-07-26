@@ -3,6 +3,7 @@ import { jsonBlock, Project, blockBlock, varBlock } from "./jsontypes.ts";
 import definitions, { Input } from "./blocks.ts";
 import decompress from "decompress";
 import fs from "node:fs"
+import { stringify } from "jsr:@std/yaml";
 await decompress('TeamCrateBoxTWO.pmp', 'TestProject', {})
 const projectJson: Project = JSON.parse(Deno.readTextFileSync('TestProject/project.json'));
 
@@ -62,6 +63,7 @@ class Scope {
 		| [string]
 		| [string, (string | number) | boolean, ...true[]]
 	} = {}
+	stage: boolean = false
 }
 
 function fromScope(scope: Scope): Scope {
@@ -444,10 +446,13 @@ function getReporterBlock(scope: Scope, block: blockBlock, definition: definitio
 			return doNext(`${block.fields.VALUE[0]}`);
 		
 		case 'data_setvariableto':
-			const definedAlready = scope.vars[block.fields.VARIABLE[0]]
-			const pre = definedAlready ? '' : `${scope.spriteVariables[block.fields.VARIABLE[1]] ? '' : 'global '}var `;
+			const definedAlready = scope.vars[block.fields.VARIABLE[1]] !== undefined;
+			const pre = definedAlready ? '' : `${!scope.stage ? '' : 'global '}var `;
 			if (!definedAlready)
 				scope.vars[block.fields.VARIABLE[1]] = block.fields.VARIABLE[0];
+			if (block.fields.VARIABLE[0] === undefined){
+				console.log(block.fields, block)
+			}
 			return doNext(`${pre}${sanitizeVar(block.fields.VARIABLE[0])} = ${stringifyInputs(scope, block, [[{name: 'VALUE', type: 1}], 'reporter'], blockse)}`)
 	}
 	if (block.opcode.includes("_menu_"))
@@ -519,90 +524,141 @@ for (const extId of projectJson.extensions ?? []) {
 	await importDefaultExtension(extId)
 }
 
+fs.rmSync('out', {
+	recursive: true,
+})
+
+fs.mkdirSync('out')
+fs.mkdirSync('out/src')
+fs.mkdirSync('out/assets')
+
+type TSound = any // TODO: finish this
+type TCostume = {
+    format: 'svg' | string
+    path: string
+}
+type TSprite = {
+    stage?: boolean
+    name: string
+    costumes: Record<string, TCostume>
+    sounds: Record<string, TSound>
+    code: null | string
+}
+type TProject = {
+    sprites: Record<string, TSprite>
+}
+
+const projectConfig: TProject = {
+	sprites: {}
+};
+
 let i = 0
+let scope = new Scope()
 for (const target of projectJson.targets) {
-	Deno.writeTextFileSync(`targets/${i}.json`, JSON.stringify(target.blocks))
-	let scope = new Scope()
-	scope.spriteVariables = target.variables
-	let code = `#include <"blocks/js" "base.js">`;
-	for (const id in target.variables) {
-		const variable = target.variables[id];
-		const value = variable[1] ?? 0;
-		console.log([
-			typeof value == 'number' ?
-				InputTypes.math_number :
-				InputTypes.text,
-			value
-		])
-		code += getReporterBlock(
-			scope,
-			{
-				fields: {
-					VARIABLE: [id, variable[0]]
+	try {
+		Deno.writeTextFileSync(`targets/${i}.json`, JSON.stringify(target.blocks))
+		scope.stage = target.isStage
+		scope.spriteVariables = target.variables
+		let code = `#include <"blocks/js" "base.js">`;
+		console.debug(scope.stage)
+		for (const id of Object.keys(target.variables)) {
+			const variable = target.variables[id];
+			// console.debug('making fake block for initializaiton of variable', id, variable)
+			const value = variable[1] ?? 0;
+			code += '\n'+getReporterBlock(
+				scope,
+				{
+					fields: {
+						VARIABLE: [variable[0], id]
+					},
+					inputs: {
+						VALUE: [1,[
+							typeof value == 'number' ?
+								InputTypes.math_number :
+								InputTypes.text,
+							value
+						]]
+					},
+					next: null,
+					topLevel: true,
+					opcode: 'data_setvariableto',
+					parent: null,
+					shadow: false,
 				},
-				inputs: {
-					VALUE: [
-						typeof value == 'number' ?
-							InputTypes.math_number :
-							InputTypes.text,
-						value
-					]
-				},
-				next: null,
-				topLevel: true,
-				opcode: 'data_setvariableto',
-				parent: null,
-				shadow: false,
-			},
-			blockDefinitions['data_setvariableto'],
-			target.blocks as Record<string, jsonBlock>,
-			0
-		)
-	}
-	const topLevelBlocks = Object.entries(target.blocks as Record<string, jsonBlock> ?? {})
-		.filter(([_, block]: [string, jsonBlock]) => !Array.isArray(block as varBlock) && (block as blockBlock).topLevel)
-		.sort(([_, a], [__, b]) => 
-			(!Array.isArray(b as varBlock) && (b as blockBlock).opcode == 'procedures_definition' ? 10 : 0) -
-			(!Array.isArray(a as varBlock) && (a as blockBlock).opcode == 'procedures_definition' ? 10 : 0)
-		);
-	for (const extId in projectJson.extensionURLs) {
-		const url = projectJson.extensionURLs[extId];
-		if (typeof url != 'string')
-			continue;
-		// console.log(url)
-		// code += `\n#include <"extension", "${url.replaceAll('\\','\\\\').replaceAll('"','\\"')}">`
-	}
-	for (const [_id, block] of topLevelBlocks) {
-		if (Array.isArray(block))
-			continue;
-		if (block.opcode != 'procedures_definition' &&
-			block.opcode !== 'procedures_definition_return') //<--
-			continue;
-		// console.log('uh yea')
-		scope = preprocessFnDecl(scope, block as jsonBlock as blockBlock, target.blocks as Record<string, jsonBlock>)
-	}
-	// console.log('oh were doingthis now ok')
-	for (const [_id, block] of topLevelBlocks) {
-		if (Array.isArray(block))
-			continue;
-		if (block.opcode == 'argument_reporter_boolean' ||
-			block.opcode == 'argument_reporter_string_number')
-			continue;
-		if (block.opcode == 'procedures_definition' ||
-			block.opcode == 'procedures_definition_return') {
-			code += getFnDecl(scope, block as jsonBlock as blockBlock, target.blocks as Record<string, jsonBlock>)
-			continue;
+				blockDefinitions['data_setvariableto'],
+				target.blocks as Record<string, jsonBlock>,
+				0
+			)
 		}
-		const definition = blockDefinitions[block.opcode];
-		if (!definition && block.opcode != 'procedures_call') {
-			console.error(`undefined definition for ${block.opcode}`)
-			code += `/* undefined definition for ${block.opcode} */`
-			continue;
+		const topLevelBlocks = Object.entries(target.blocks as Record<string, jsonBlock> ?? {})
+			.filter(([_, block]: [string, jsonBlock]) => !Array.isArray(block as varBlock) && (block as blockBlock).topLevel)
+			.sort(([_, a], [__, b]) => 
+				(!Array.isArray(b as varBlock) && (b as blockBlock).opcode == 'procedures_definition' ? 10 : 0) -
+				(!Array.isArray(a as varBlock) && (a as blockBlock).opcode == 'procedures_definition' ? 10 : 0)
+			);
+		for (const extId in projectJson.extensionURLs) {
+			const url = projectJson.extensionURLs[extId];
+			if (typeof url != 'string')
+				continue;
+			// console.log(url)
+			// code += `\n#include <"extension", "${url.replaceAll('\\','\\\\').replaceAll('"','\\"')}">`
 		}
-		if (definition && definition[1] == 'hat') {
-			code += getHatBlock(scope, block as jsonBlock as blockBlock, definition, target.blocks as Record<string, jsonBlock>)
+		for (const [_id, block] of topLevelBlocks) {
+			if (Array.isArray(block))
+				continue;
+			if (block.opcode != 'procedures_definition' &&
+				block.opcode !== 'procedures_definition_return') //<--
+				continue;
+			// console.log('uh yea')
+			scope = preprocessFnDecl(scope, block as jsonBlock as blockBlock, target.blocks as Record<string, jsonBlock>)
 		}
+		// console.log('oh were doingthis now ok')
+		for (const [_id, block] of topLevelBlocks) {
+			if (Array.isArray(block))
+				continue;
+			if (block.opcode == 'argument_reporter_boolean' ||
+				block.opcode == 'argument_reporter_string_number')
+				continue;
+			if (block.opcode == 'procedures_definition' ||
+				block.opcode == 'procedures_definition_return') {
+				code += getFnDecl(scope, block as jsonBlock as blockBlock, target.blocks as Record<string, jsonBlock>)
+				continue;
+			}
+			const definition = blockDefinitions[block.opcode];
+			if (!definition && block.opcode != 'procedures_call') {
+				console.error(`undefined definition for ${block.opcode}`)
+				code += `/* undefined definition for ${block.opcode} */`
+				continue;
+			}
+			if (definition && definition[1] == 'hat') {
+				code += getHatBlock(scope, block as jsonBlock as blockBlock, definition, target.blocks as Record<string, jsonBlock>)
+			}
+		}
+		Deno.writeTextFileSync(`out/src/${target.name.replaceAll('/','_')}.bsl`, code)
+		projectConfig.sprites[i.toString()] = {
+			code: `src/${target.name.replaceAll('/','_')}.bsl`,
+			costumes: Object.fromEntries(
+				Object.entries(target.costumes)
+					.map<[string, TCostume]>( ([n, c]) => {
+						fs.cpSync(
+							`./TestProject/${c.assetId}.${c.dataFormat}`,
+							`out/assets/${target.name.replaceAll('/','_')}/costumes/${c.name.replaceAll('/','_')}.${c.dataFormat}`
+						)
+						return [c.name, {
+							format: c.dataFormat,
+							path: `assets/${target.name.replaceAll('/','_')}/costumes/${c.name.replaceAll('/','_')}.${c.dataFormat}`
+						}]
+					})
+			),
+			name: target.name,
+			sounds: {}, //TODO - finish this when i finish sounds in backslash
+			stage: target.isStage
+		}
+	} catch (error) {
+		console.error('error while processing target', i)
+		throw error
 	}
-	Deno.writeTextFileSync(`out/${target.name.replaceAll('/','_')}.bsl`, code)
 	i++
 }
+
+Deno.writeTextFileSync('out/project.prj.yaml', stringify(projectConfig))

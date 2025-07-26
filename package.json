@@ -1,5 +1,6 @@
 {
 	"dependencies": {
+		"@std/yaml": "jsr:^1.0.9",
 		"@types/node": "^24.0.10",
 		"decompress": "^4.2.1"
 	}

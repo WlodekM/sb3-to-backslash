@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@std/yaml':
+        specifier: jsr:^1.0.9
+        version: '@jsr/std__yaml@1.0.9'
       '@types/node':
         specifier: ^24.0.10
         version: 24.0.10
@@ -16,6 +19,9 @@ importers:
         version: 4.2.1
 
 packages:
+
+  '@jsr/std__yaml@1.0.9':
+    resolution: {integrity: sha512-lusWadC21PLDZalIaNNbxze5lsMlKod+sZjk16ckgRLUnFx99WBfJDgd3alSgrYZ4KxTNxzPIQgdRVN2c//yNQ==, tarball: https://npm.jsr.io/~/11/@jsr/std__yaml/1.0.9.tgz}
 
   '@types/node@24.0.10':
     resolution: {integrity: sha512-ENHwaH+JIRTDIEEbDK6QSQntAYGtbvdDXnMXnZaZ6k13Du1dPMmprkEHIL7ok2Wl2aZevetwTAb5S+7yIF+enA==}
@@ -295,6 +301,8 @@ packages:
     resolution: {integrity: sha512-p4a9I6X6nu6IhoGmBqAcbJy1mlC4j27vEPZX9F4L4/vZT3Lyq1VkFHw/V/PUcB9Buo+DG3iHkT0x3Qya58zc3g==}
 
 snapshots:
+
+  '@jsr/std__yaml@1.0.9': {}
 
   '@types/node@24.0.10':
     dependencies:
