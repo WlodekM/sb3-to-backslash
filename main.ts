@@ -4,7 +4,7 @@ import definitions, { Input } from "./blocks.ts";
 import decompress from "decompress";
 import fs from "node:fs"
 import { stringify } from "jsr:@std/yaml";
-await decompress('TeamCrateBoxTWO.pmp', 'TestProject', {})
+await decompress('ProjectTEst.pmp', 'TestProject', {})
 const projectJson: Project = JSON.parse(Deno.readTextFileSync('TestProject/project.json'));
 
 const vmDir = 'pm-vm'
@@ -289,7 +289,11 @@ async function importDefaultExtension(id: string) {
 		}
 		return class {}
 	}
-	const dir = id == 'lmsTempVars2' ? 'lily_tempVars2' : id;
+	const dir = 
+		id == 'lmsTempVars2' ? 'lily_tempVars2' :
+		id == 'text' ? 'scratchLab_animatedText' :
+		id == 'tempVars' ? 'gsa_tempVars' :
+		id;
 	// console.log(dir, dir.match(/^jg[A-Z]/), dir.replace(/^jg([A-Z])/,(_,l)=>'jg_'+l.toLowerCase()),
 	// 	dir.replace(/^jg([A-Z])/,(_,l)=>'jg_'+l))
 	let path = fs.existsSync(`./${vmDir}/src/extensions/${dir}/index.js`) ?
@@ -351,7 +355,7 @@ async function importDefaultExtension(id: string) {
 }
 
 function sanitizeVar(varname: string) {
-	return varname.replaceAll(' ', '_').replaceAll('(', '_').replaceAll(')', '_').replaceAll('\n', '_').replaceAll('"', '_').replaceAll('.', '_')
+	return varname.replaceAll(/[^A-z0-9_#]/g, '_').replaceAll('\\','_')
 }
 
 function stringifyInputs(scope: Scope, block: blockBlock, definition: definition, blockse: Record<string, jsonBlock>): string {
@@ -390,7 +394,8 @@ function stringifyInputs(scope: Scope, block: blockBlock, definition: definition
 			result.push(`"${String(inputInput[1]).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
 			continue;
 		}
-		if (inputInput[0] == InputTypes.data_variable) {
+		if (inputInput[0] == InputTypes.data_variable ||
+			inputInput[0] == InputTypes.data_listcontents) {
 			result.push(`${sanitizeVar(inputInput[1])}`)
 			continue;
 		}
@@ -466,7 +471,7 @@ function getReporterBlock(
 		
 		case 'argument_reporter_boolean':
 		case 'argument_reporter_string_number':
-			return doNext(`${block.fields.VALUE[0]}`);
+			return doNext(`${sanitizeVar(block.fields.VALUE[0])}`);
 		
 		case 'data_setvariableto':
 			const definedAlready =
@@ -505,12 +510,32 @@ ${block.next ? getReporterBlock(scope, blockse[block.next] as blockBlock, blockD
 }`
 }
 
+const registered: { name: string }[] = [
+	'return',
+	'var',
+	'list',
+	'global',
+	'fn',
+	'warp',
+	'if',
+	'for',
+	'gf',
+	'start',
+	'else',
+].map(name => ({ name }))
+
 function preprocessFnDecl(scope: Scope, block: blockBlock, blockse: Record<string, jsonBlock>): Scope {
 	const prototype: blockBlock = blockse[block.inputs.custom_block[1]] as blockBlock;
-	if (!prototype.mutation || !prototype.mutation.proccode || typeof prototype.mutation.proccode != 'string' || !prototype.mutation.argumentnames)
+	if (!prototype.mutation ||
+		!prototype.mutation.proccode ||
+		typeof prototype.mutation.proccode != 'string' ||
+		!prototype.mutation.argumentnames)
 		throw 'what the shit where the fuck did you get this sb3 from'
-	let name = (prototype.mutation.proccode.match(/^(.*?)(( %)|$)/) ?? ['','UNDEFINED'])[1].replaceAll(' ', '_');
-	while (Object.values(scope.customBlocks).some(b => b.name == name))
+	let name = sanitizeVar((prototype.mutation.proccode.match(/^(.*?)(( %)|$)/) ?? ['','UNDEFINED'])[1]);
+	while (
+		[...Object.values(scope.customBlocks),...registered]
+		.some(b => b.name == name)
+	)
 		name += '_';
 	scope.customBlocks[prototype.mutation.proccode] = {
 		name,
@@ -527,14 +552,16 @@ function getFnDecl(scope: Scope, block: blockBlock, blockse: Record<string, json
 	if (!prototype.mutation || !prototype.mutation.proccode || typeof prototype.mutation.proccode != 'string' || !prototype.mutation.argumentnames)
 		throw 'what the shit where the fuck did you get this sb3 from'
 	const newScope = fromScope(scope);
-	const names = JSON.parse(prototype.mutation.argumentnames ?? '[]')
+	const names = JSON.parse(prototype.mutation.argumentnames ?? '[]').map((k:string)=>sanitize(k))
 	newScope.customBlockArgs = Object.fromEntries(
 		JSON.parse(prototype.mutation.argumentids ?? '[]')
-		.map((id:string, i:number) => [id, names[i]])
+		.map((id:string, i:number) => [id, sanitize(names[i])])
 	)
 	let name = scope.customBlocks[prototype.mutation.proccode].name
 	return `
-${JSON.parse(String(prototype.mutation.warp ?? 'false')) ? 'warp ' : ''}fn ${name}(${JSON.parse(prototype.mutation.argumentnames).join(', ')}) {
+${JSON.parse(String(prototype.mutation.warp ?? 'false')) ? 'warp ' : ''}fn ${name}(${
+	JSON.parse(prototype.mutation.argumentnames).map((n: string) => sanitize(n)).join(', ')
+}) {
 ${block.next ? getReporterBlock(scope, blockse[block.next] as blockBlock, blockDefinitions[(blockse[block.next] as blockBlock).opcode], blockse, level + 1) : ''}
 }`
 }
@@ -581,6 +608,16 @@ const projectConfig: TProject = {
 	sprites: {}
 };
 
+function sanitize(txt: string): string {
+	let name = sanitizeVar(txt)
+	while (
+		[...Object.values(scope.customBlocks),...registered]
+		.some(b => b.name == name)
+	)
+		name += '_';
+	return name
+}
+
 let i = 0
 let scope = new Scope()
 for (const target of projectJson.targets) {
@@ -591,8 +628,18 @@ for (const target of projectJson.targets) {
 		let code = `#include <"blocks/js" "base.js">`;
 		for (const id of Object.keys(target.variables)) {
 			const variable = target.variables[id];
+			if (!variable || variable.length == 0)
+				continue;
 			// console.debug('making fake block for initializaiton of variable', id, variable)
 			const value = variable[1] ?? 0;
+			// let name = sanitizeVar(variable[0]!)
+			// while (
+			// 	[...Object.values(scope.customBlocks),...registered]
+			// 	.some(b => b.name == name)
+			// )
+			// 	name += '_';
+			if (variable[0])
+				variable[0] = sanitize(variable[0])
 			code += '\n'+getReporterBlock(
 				scope,
 				{
@@ -627,7 +674,7 @@ for (const target of projectJson.targets) {
 			const value = list[1] ?? 0;
 			code += `\n${scope.stage ? 'global ' : ''}list ${sanitizeVar(list[0] ?? (()=>{throw'a'})())} = {${
 				value && value.length > 0 ? value.map(i => {
-					return '\n\t'+(typeof i == 'number' ? i.toString :
+					return '\n\t'+(typeof i == 'number' ? i.toString() :
 						typeof i == 'boolean' ? (i ? 'true' : 'false') :
 						`"${String(i).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
 				}).join(',')+'\n' : ' '
@@ -635,7 +682,7 @@ for (const target of projectJson.targets) {
 		}
 		if (scope.stage) {
 			for (const extId of (projectJson.extensions ?? [])) {
-				const url = projectJson.extensionURLs![extId];
+				const url = (projectJson.extensionURLs??{})[extId];
 				if (url) {
 					code += `\n#include <"extension" "${
 						String(url).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}">`;
