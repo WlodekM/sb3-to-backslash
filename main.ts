@@ -79,6 +79,10 @@ type Class = typeof _class
 async function importExtension(url: string) {
 	// console.log('importing', url)
 	const nop = () => { };
+	const asyncNop = () => {
+		const a = { then: ()=>a, catch: ()=>a };
+		return a
+	}
 	// deno-lint-ignore no-explicit-any
 	let ext: any = null;
 	//@ts-ignore:
@@ -88,7 +92,7 @@ async function importExtension(url: string) {
 	//@ts-ignore:
 	const Scratch = globalThis.Scratch = {
 		translate: (a: string) => a,
-		fetch,
+		fetch: asyncNop,
 		extensions: {
 			unsandboxed: true,
 			register: (e: Class) => { ext = e }
@@ -195,10 +199,15 @@ async function importExtension(url: string) {
 
 async function importDefaultExtension(id: string) {
 	const nop = () => { };
+	const asyncNop = () => {
+		const a = { then: ()=>a, catch: ()=>a };
+		return a
+	}
 	let ext: any = null;
 	//@ts-ignore:
 	const Scratch = globalThis.Scratch = {
 		translate: (a: string) => a,
+		fetch: asyncNop,
 		extensions: {
 			unsandboxed: true,
 			register: (e: Class) => { ext = e }
@@ -357,6 +366,10 @@ function stringifyInputs(scope: Scope, block: blockBlock, definition: definition
 			result.push(`"${String(block.fields[input.name][0]).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
 			continue;
 		}
+		if (!inputData) {
+			result.push(`""`)
+			continue;
+		}
 		const inputInput: [number, string] | string = inputData[1];
 		if (typeof inputInput == 'string') {
 			const iBlock = blockse[inputInput] as jsonBlock as blockBlock;
@@ -369,7 +382,7 @@ function stringifyInputs(scope: Scope, block: blockBlock, definition: definition
 			inputInput[0] == InputTypes.math_integer ||
 			inputInput[0] == InputTypes.math_angle
 		) {
-			result.push(String(inputInput[1]))
+			result.push(String(inputInput[1] === '' ? 0 : inputInput[1]))
 			continue;
 		}
 		if (inputInput[0] == InputTypes.text ||
@@ -392,8 +405,13 @@ function stringifyInputs(scope: Scope, block: blockBlock, definition: definition
 }
 
 function getBranchBlock(scope: Scope, block: blockBlock, definition: [Input[], "branch", string[]], blockse: Record<string, jsonBlock>, level: number): string {
-	const head = getReporterBlock(scope, block, definition, blockse, level, true, true);
+	const head = getReporterBlock(scope, block, definition, blockse, level, true, false);
 	const branches: string[] = [];
+	function doNext(code: string) {
+		if (!block.next)
+			return code;
+		return indent(level, `${code}\n${getReporterBlock(scope, blockse[block.next] as blockBlock, blockDefinitions[(blockse[block.next] as blockBlock).opcode], blockse, 0)}`)
+	}
 	for (const branch of definition[2]) {
 		const jej = block.inputs[branch];
 		if (!jej) {
@@ -406,10 +424,15 @@ function getBranchBlock(scope: Scope, block: blockBlock, definition: [Input[], "
 			continue;
 		branches.push(getReporterBlock(scope, blockse[a] as blockBlock, blockDefinitions[(blockse[a] as blockBlock).opcode], blockse, 1))
 	}
-	return indent(level, `${head} ${branches.map(c => `{\n${c}\n}`).join(' ')}`)
+	return `${head} ${branches.map(c => `{\n${c}\n}`).join(' ')}`
 }
 
-function getReporterBlock(scope: Scope, block: blockBlock, definition: definition, blockse: Record<string, jsonBlock>, level: number, ignoreBranch: boolean = false, next = true): string {
+function getReporterBlock(
+	scope: Scope, block: blockBlock, definition: definition,
+	blockse: Record<string, jsonBlock>, level: number,
+	ignoreBranch: boolean = false, next = true,
+	forceVariableDefinition: boolean = false
+): string {
 	// console.log(`reporterBlock`, block.opcode, level)
 	switch (block.opcode) {
 		case 'operator_notequal':
@@ -418,7 +441,7 @@ function getReporterBlock(scope: Scope, block: blockBlock, definition: definitio
 					{name:'OPERAND1',type:1},
 					{name:'OPERAND2',type:1}
 				],'reporter'
-			], blockse).replace(', ', ' !=')}`)
+			], blockse).replace(', ', ' != ')}`)
 		case 'procedures_return':
 			return doNext(`return ${stringifyInputs(scope, block, [[{name:'return',type:1}],'reporter'], blockse)}`)
 		case 'procedures_call':
@@ -446,7 +469,9 @@ function getReporterBlock(scope: Scope, block: blockBlock, definition: definitio
 			return doNext(`${block.fields.VALUE[0]}`);
 		
 		case 'data_setvariableto':
-			const definedAlready = scope.vars[block.fields.VARIABLE[1]] !== undefined;
+			const definedAlready =
+				(scope.vars[block.fields.VARIABLE[1]] !== undefined)
+				&& !forceVariableDefinition;
 			const pre = definedAlready ? '' : `${!scope.stage ? '' : 'global '}var `;
 			if (!definedAlready)
 				scope.vars[block.fields.VARIABLE[1]] = block.fields.VARIABLE[0];
@@ -462,11 +487,11 @@ function getReporterBlock(scope: Scope, block: blockBlock, definition: definitio
 		return doNext(`/* undefined definition for ${block.opcode} */`)
 	}
 	if (definition[1] == 'branch' && !ignoreBranch) {
-		return doNext(getBranchBlock(scope, block, definition as [Input[], "branch", string[]], blockse, level))
+		return doNext(getBranchBlock(scope, block, definition as [Input[], "branch", string[]], blockse, 0))
 	}
 	function doNext(code: string) {
 		if (!block.next || !next)
-			return code;
+			return indent(level, code);
 		return indent(level, `${code}\n${getReporterBlock(scope, blockse[block.next] as blockBlock, blockDefinitions[(blockse[block.next] as blockBlock).opcode], blockse, 0)}`)
 	}
 	return doNext(`${block.opcode}(${stringifyInputs(scope, block, definition, blockse)})`)
@@ -484,7 +509,7 @@ function preprocessFnDecl(scope: Scope, block: blockBlock, blockse: Record<strin
 	const prototype: blockBlock = blockse[block.inputs.custom_block[1]] as blockBlock;
 	if (!prototype.mutation || !prototype.mutation.proccode || typeof prototype.mutation.proccode != 'string' || !prototype.mutation.argumentnames)
 		throw 'what the shit where the fuck did you get this sb3 from'
-	let name = (prototype.mutation.proccode.match(/^(.*?) %/) ?? 'UNDEFINED')[1].replaceAll(' ', '_');
+	let name = (prototype.mutation.proccode.match(/^(.*?)(( %)|$)/) ?? ['','UNDEFINED'])[1].replaceAll(' ', '_');
 	while (Object.values(scope.customBlocks).some(b => b.name == name))
 		name += '_';
 	scope.customBlocks[prototype.mutation.proccode] = {
@@ -507,6 +532,7 @@ function getFnDecl(scope: Scope, block: blockBlock, blockse: Record<string, json
 		JSON.parse(prototype.mutation.argumentids ?? '[]')
 		.map((id:string, i:number) => [id, names[i]])
 	)
+	let name = scope.customBlocks[prototype.mutation.proccode].name
 	return `
 ${JSON.parse(String(prototype.mutation.warp ?? 'false')) ? 'warp ' : ''}fn ${name}(${JSON.parse(prototype.mutation.argumentnames).join(', ')}) {
 ${block.next ? getReporterBlock(scope, blockse[block.next] as blockBlock, blockDefinitions[(blockse[block.next] as blockBlock).opcode], blockse, level + 1) : ''}
@@ -532,7 +558,10 @@ fs.mkdirSync('out')
 fs.mkdirSync('out/src')
 fs.mkdirSync('out/assets')
 
-type TSound = any // TODO: finish this
+type TSound = {
+    format: 'wav' | 'mp3' | string
+    path: string
+}
 type TCostume = {
     format: 'svg' | string
     path: string
@@ -560,7 +589,6 @@ for (const target of projectJson.targets) {
 		scope.stage = target.isStage
 		scope.spriteVariables = target.variables
 		let code = `#include <"blocks/js" "base.js">`;
-		console.debug(scope.stage)
 		for (const id of Object.keys(target.variables)) {
 			const variable = target.variables[id];
 			// console.debug('making fake block for initializaiton of variable', id, variable)
@@ -587,8 +615,35 @@ for (const target of projectJson.targets) {
 				},
 				blockDefinitions['data_setvariableto'],
 				target.blocks as Record<string, jsonBlock>,
-				0
+				0,
+				false,
+				false,
+				true
 			)
+		}
+		for (const id of Object.keys(target.lists ?? {})) {
+			const list = target.lists![id];
+			// console.debug('making fake block for initializaiton of variable', id, variable)
+			const value = list[1] ?? 0;
+			code += `\n${scope.stage ? 'global ' : ''}list ${sanitizeVar(list[0] ?? (()=>{throw'a'})())} = {${
+				value && value.length > 0 ? value.map(i => {
+					return '\n\t'+(typeof i == 'number' ? i.toString :
+						typeof i == 'boolean' ? (i ? 'true' : 'false') :
+						`"${String(i).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
+				}).join(',')+'\n' : ' '
+			}}`
+		}
+		if (scope.stage) {
+			for (const extId of (projectJson.extensions ?? [])) {
+				const url = projectJson.extensionURLs![extId];
+				if (url) {
+					code += `\n#include <"extension" "${
+						String(url).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}">`;
+					continue;
+				}
+				code += `\n#include <"extension/builtin" "${
+					String(extId).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}">`
+			}
 		}
 		const topLevelBlocks = Object.entries(target.blocks as Record<string, jsonBlock> ?? {})
 			.filter(([_, block]: [string, jsonBlock]) => !Array.isArray(block as varBlock) && (block as blockBlock).topLevel)
@@ -651,7 +706,19 @@ for (const target of projectJson.targets) {
 					})
 			),
 			name: target.name,
-			sounds: {}, //TODO - finish this when i finish sounds in backslash
+			sounds: Object.fromEntries(
+				Object.entries(target.sounds)
+					.map<[string, TCostume]>( ([n, c]) => {
+						fs.cpSync(
+							`./TestProject/${c.assetId}.${c.dataFormat}`,
+							`out/assets/${target.name.replaceAll('/','_')}/sounds/${c.name.replaceAll('/','_')}.${c.dataFormat}`
+						)
+						return [c.name, {
+							format: c.dataFormat,
+							path: `assets/${target.name.replaceAll('/','_')}/sounds/${c.name.replaceAll('/','_')}.${c.dataFormat}`
+						}]
+					})
+			),
 			stage: target.isStage
 		}
 	} catch (error) {
