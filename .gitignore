@@ -7,3 +7,4 @@ targets
 pm-vm
 pm-blocks
 *.pmp
+*.log

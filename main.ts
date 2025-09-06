@@ -608,6 +608,7 @@ type TSound = {
 type TCostume = {
     format: 'svg' | string
     path: string
+    rotationCenter?: [number, number]
 }
 type TSprite = {
     stage?: boolean
@@ -764,7 +765,12 @@ for (const target of projectJson.targets) {
 						)
 						return [c.name, {
 							format: c.dataFormat,
-							path: `assets/${target.name.replaceAll('/','_')}/costumes/${c.name.replaceAll('/','_')}.${c.dataFormat}`
+							path: `assets/${target.name.replaceAll('/','_')}/costumes/${c.name.replaceAll('/','_')}.${c.dataFormat}`,
+							...(
+								c.rotationCenterX && c.rotationCenterY ? 
+								{rotationCenter: [c.rotationCenterX, c.rotationCenterY]} :
+								{}
+							)
 						}]
 					})
 			),
