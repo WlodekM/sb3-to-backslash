@@ -4,7 +4,7 @@ import definitions, { Input } from "./blocks.ts";
 import decompress from "decompress";
 import fs from "node:fs"
 import { stringify } from "jsr:@std/yaml";
-await decompress('ProjectTEst.pmp', 'TestProject', {})
+await decompress('castle crashers clone.sb3', 'TestProject', {})
 const projectJson: Project = JSON.parse(Deno.readTextFileSync('TestProject/project.json'));
 
 const vmDir = 'pm-vm'
@@ -484,6 +484,22 @@ function getReporterBlock(
 				console.log(block.fields, block)
 			}
 			return doNext(`${pre}${sanitizeVar(block.fields.VARIABLE[0])} = ${stringifyInputs(scope, block, [[{name: 'VALUE', type: 1}], 'reporter'], blockse)}`)
+
+			
+		case 'data_changevariableby':
+			const _definedAlready =
+			(scope.vars[block.fields.VARIABLE[1]] !== undefined)
+			&& !forceVariableDefinition;
+			const _pre = _definedAlready ? '' : `${!scope.stage ? '' : 'global '}var `;
+			if (!_definedAlready)
+				scope.vars[block.fields.VARIABLE[1]] = block.fields.VARIABLE[0];
+			if (block.fields.VARIABLE[0] === undefined){
+				console.log(block.fields, block)
+			}
+			return doNext(`${_pre}${sanitizeVar(block.fields.VARIABLE[0])} = ${sanitizeVar(block.fields.VARIABLE[0])} + (${stringifyInputs(scope, block, [[{name: 'VALUE', type: 1}], 'reporter'], blockse)})`)
+		
+		case 'sensing_keyoptions':
+			return doNext(`"${(Object.values(block.fields) as [string, ...any[]][])[0][0].replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`);
 	}
 	if (block.opcode.includes("_menu_"))
 		return doNext(`"${(Object.values(block.fields) as [string, ...any[]][])[0][0].replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
