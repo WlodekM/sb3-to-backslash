@@ -4,7 +4,7 @@ import definitions, { Input } from "./blocks.ts";
 import decompress from "decompress";
 import fs from "node:fs"
 import { stringify } from "jsr:@std/yaml";
-await decompress('castle crashers clone.sb3', 'TestProject', {})
+await decompress(Deno.args[0] ?? 'Project-test.sb3', 'TestProject', {})
 const projectJson: Project = JSON.parse(Deno.readTextFileSync('TestProject/project.json'));
 
 const vmDir = 'pm-vm'
@@ -55,6 +55,8 @@ class Scope {
 	customBlocks: Record<string, CustomBlock> = {};
 	// id to name
 	vars: Record<string, string> = {};
+	lists: Record<string, string> = {};
+	global_lists: Record<string, string> = {};
 	// id to name,
 	customBlockArgs: Record<string, string> = {}
 	spriteVariables: {
@@ -440,6 +442,13 @@ function getReporterBlock(
 ): string {
 	// console.log(`reporterBlock`, block.opcode, level)
 	switch (block.opcode) {
+		case 'skyhigh173JSON_menu_get_list':
+			console.log(scope.lists, block.fields)
+			const listname = scope.lists[block.fields.get_list] ?? 'UNKNOWN_LIST';
+			if (listname == 'UNKNOWN_LIST')
+				console.warn(`unknown list in special handling for skyhigh173JSON_menu_get_list`)
+			return doNext(`"${listname.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
+			throw 'balls'
 		case 'operator_notequal':
 			return doNext(`${stringifyInputs(scope, block, [
 				[
@@ -451,7 +460,9 @@ function getReporterBlock(
 			return doNext(`return ${stringifyInputs(scope, block, [[{name:'return',type:1}],'reporter'], blockse)}`)
 		case 'procedures_call':
 			// console.log(block.mutation?.proccode)
-			if (block.mutation?.proccode == '​​log​​ %s')
+			if (block.mutation?.proccode == '​​log​​ %s' ||
+				block.mutation?.proccode == '​​error​​ %s' ||
+				block.mutation?.proccode == '​​warn​​ %s')
 				return '';
 			if (!scope.customBlocks[block.mutation?.proccode ?? ''])
 				console.error(`custom block of proccode "${block.mutation?.proccode ?? ''}" not found`);
@@ -593,6 +604,7 @@ for (const extId of projectJson.extensions ?? []) {
 	await importDefaultExtension(extId)
 }
 
+if (fs.existsSync('out'))
 fs.rmSync('out', {
 	recursive: true,
 })
@@ -619,10 +631,13 @@ type TSprite = {
 }
 type TProject = {
     sprites: Record<string, TSprite>
+    preprocess?: string
+    search_dir?: string
 }
 
 const projectConfig: TProject = {
-	sprites: {}
+	sprites: {},
+	search_dir: 'src/'
 };
 
 function sanitize(txt: string): string {
@@ -635,6 +650,8 @@ function sanitize(txt: string): string {
 	return name
 }
 
+fs.mkdirSync('targets',{recursive:true})
+
 let i = 0
 let scope = new Scope()
 for (const target of projectJson.targets) {
@@ -642,6 +659,13 @@ for (const target of projectJson.targets) {
 		Deno.writeTextFileSync(`targets/${i}.json`, JSON.stringify(target.blocks))
 		scope.stage = target.isStage
 		scope.spriteVariables = target.variables
+		scope.lists = Object.fromEntries(
+			Object.entries(target.lists as any).map(([id, list]) => {
+				console.log(id, list)
+				return [id, list[0]];
+			})
+		)
+		console.log(scope.lists)
 		let code = `#include <"blocks/js" "base.js">`;
 		for (const id of Object.keys(target.variables)) {
 			const variable = target.variables[id];
@@ -753,19 +777,24 @@ for (const target of projectJson.targets) {
 				code += getHatBlock(scope, block as jsonBlock as blockBlock, definition, target.blocks as Record<string, jsonBlock>)
 			}
 		}
-		Deno.writeTextFileSync(`out/src/${target.name.replaceAll('/','_')}.bsl`, code)
-		projectConfig.sprites[i.toString()] = {
-			code: `src/${target.name.replaceAll('/','_')}.bsl`,
+		const dirname = target.name.replaceAll(/\/(?!\/)/g,'_').replaceAll('//','/')
+		fs.mkdirSync(`out/src/${dirname}`, {recursive:true})
+		fs.mkdirSync(`out/src/${dirname}/assets`, {recursive:true})
+		fs.mkdirSync(`out/src/${dirname}/assets/costumes`, {recursive:true})
+		fs.mkdirSync(`out/src/${dirname}/assets/sounds`, {recursive:true})
+		Deno.writeTextFileSync(`out/src/${dirname}/code.bsl`, code)
+		/*projectConfig.sprites[i.toString()] =*/const config = {
+			code: `src/${dirname}/code.bsl`,
 			costumes: Object.fromEntries(
 				Object.entries(target.costumes)
 					.map<[string, TCostume]>( ([n, c]) => {
 						fs.cpSync(
 							`./TestProject/${c.assetId}.${c.dataFormat}`,
-							`out/assets/${target.name.replaceAll('/','_')}/costumes/${c.name.replaceAll('/','_')}.${c.dataFormat}`
+							`out/src/${dirname}/assets/costumes/${c.name.replaceAll('/','_')}.${c.dataFormat}`
 						)
 						return [c.name, {
 							format: c.dataFormat,
-							path: `assets/${target.name.replaceAll('/','_')}/costumes/${c.name.replaceAll('/','_')}.${c.dataFormat}`,
+							path: `src/${dirname}/assets/costumes/${c.name.replaceAll('/','_')}.${c.dataFormat}`,
 							...(
 								c.rotationCenterX && c.rotationCenterY ? 
 								{rotationCenter: [c.rotationCenterX, c.rotationCenterY]} :
@@ -780,16 +809,17 @@ for (const target of projectJson.targets) {
 					.map<[string, TCostume]>( ([n, c]) => {
 						fs.cpSync(
 							`./TestProject/${c.assetId}.${c.dataFormat}`,
-							`out/assets/${target.name.replaceAll('/','_')}/sounds/${c.name.replaceAll('/','_')}.${c.dataFormat}`
+							`out/src/${dirname}/assets/sounds/${c.name.replaceAll('/','_')}.${c.dataFormat}`
 						)
 						return [c.name, {
 							format: c.dataFormat,
-							path: `assets/${target.name.replaceAll('/','_')}/sounds/${c.name.replaceAll('/','_')}.${c.dataFormat}`
+							path: `src/${dirname}/assets/sounds/${c.name.replaceAll('/','_')}.${c.dataFormat}`
 						}]
 					})
 			),
 			stage: target.isStage
 		}
+		Deno.writeTextFileSync(`out/src/${dirname}/${target.name.replaceAll('/','_')}.spr.yaml`, stringify(config))
 	} catch (error) {
 		console.error('error while processing target', i)
 		throw error
