@@ -360,7 +360,7 @@ function sanitizeVar(varname: string) {
 	return varname.replaceAll(/[^A-z0-9_#]/g, '_').replaceAll('\\','_')
 }
 
-function stringifyInputs(scope: Scope, block: blockBlock, definition: definition, blockse: Record<string, jsonBlock>): string {
+function stringifyInputs(scope: Scope, block: blockBlock, definition: definition, blockse: Record<string, jsonBlock>, joiner?: string): string {
 	// console.log(`strInputs ${block.opcode}`)
 	const result: string[] = []
 	for (const input of definition[0]) {
@@ -408,7 +408,7 @@ function stringifyInputs(scope: Scope, block: blockBlock, definition: definition
 		console.error(`INPUT TYPE ${inputInput[0]} NOT IMPLEMENTED`)
 	}
 	// console.log(result)
-	return result.join(', ');
+	return result.join(joiner ?? ', ');
 }
 
 function getBranchBlock(scope: Scope, block: blockBlock, definition: [Input[], "branch", string[]], blockse: Record<string, jsonBlock>, level: number): string {
@@ -443,8 +443,9 @@ function getReporterBlock(
 	// console.log(`reporterBlock`, block.opcode, level)
 	switch (block.opcode) {
 		case 'skyhigh173JSON_menu_get_list':
-			console.log(scope.lists, block.fields)
-			const listname = scope.lists[block.fields.get_list] ?? 'UNKNOWN_LIST';
+			const listname = {...scope.lists, ...scope.global_lists}
+				[block.fields.get_list[0]] ?? 'UNKNOWN_LIST';
+			// console.log({...scope.lists, ...scope.global_lists}, block.fields, listname)
 			if (listname == 'UNKNOWN_LIST')
 				console.warn(`unknown list in special handling for skyhigh173JSON_menu_get_list`)
 			return doNext(`"${listname.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
@@ -455,7 +456,7 @@ function getReporterBlock(
 					{name:'OPERAND1',type:1},
 					{name:'OPERAND2',type:1}
 				],'reporter'
-			], blockse).replace(', ', ' != ')}`)
+			], blockse, ' != ')}`)
 		case 'procedures_return':
 			return doNext(`return ${stringifyInputs(scope, block, [[{name:'return',type:1}],'reporter'], blockse)}`)
 		case 'procedures_call':
@@ -469,7 +470,7 @@ function getReporterBlock(
 			const customBlock = scope.customBlocks[block.mutation?.proccode ?? ''];
 			if (!customBlock)
 				return doNext(`/* unknown custom block ${block.mutation?.proccode} */`)
-			const definition: definition = [
+			const _definition: definition = [
 				customBlock.arguments.map<Input>((a) => {
 					return {
 						name: a,
@@ -478,7 +479,7 @@ function getReporterBlock(
 				}),
 				'reporter'
 			]
-			return doNext(`${customBlock.name}(${stringifyInputs(scope, block, definition, blockse)})`)
+			return doNext(`${customBlock.name}(${stringifyInputs(scope, block, _definition, blockse)})`)
 		
 		case 'argument_reporter_boolean':
 		case 'argument_reporter_string_number':
@@ -511,6 +512,38 @@ function getReporterBlock(
 		
 		case 'sensing_keyoptions':
 			return doNext(`"${(Object.values(block.fields) as [string, ...any[]][])[0][0].replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`);
+		
+		case 'operator_and':
+		case 'operator_or':
+		case 'operator_equals':
+		case 'operator_lt':
+		case 'operator_gt':
+		case 'operator_add':
+		case 'operator_subtract':
+		case 'operator_multiply':
+		case 'operator_divide':
+			const operator: Record<string, string> = {
+				operator_and: '&&',
+				operator_or: '||',
+				operator_equals: '==',
+				operator_lt: '<',
+				operator_gt: '>',
+				operator_add: '+',
+				operator_subtract: '-',
+				operator_multiply: '*',
+				operator_divide: '/'
+			}
+			return doNext(`${stringifyInputs(scope, block, [
+				[
+					{name:'OPERAND1',type:1},
+					{name:'OPERAND2',type:1}
+				],'reporter'
+			], blockse, ` ${operator[block.opcode]} `)}`)
+		// case 'control_if':
+		// 	return doNext(
+		// 		getBranchBlock(scope, block, definition as [Input[], "branch", string[]], blockse, 0)
+		// 			.replace('control_if', 'if')
+		// 	)
 	}
 	if (block.opcode.includes("_menu_"))
 		return doNext(`"${(Object.values(block.fields) as [string, ...any[]][])[0][0].replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
@@ -526,7 +559,10 @@ function getReporterBlock(
 			return indent(level, code);
 		return indent(level, `${code}\n${getReporterBlock(scope, blockse[block.next] as blockBlock, blockDefinitions[(blockse[block.next] as blockBlock).opcode], blockse, 0)}`)
 	}
-	return doNext(`${block.opcode}(${stringifyInputs(scope, block, definition, blockse)})`)
+	const aliases: Record<string, string> = {
+		control_if: 'if'
+	}
+	return doNext(`${aliases[block.opcode]??block.opcode}(${stringifyInputs(scope, block, definition, blockse)})`)
 }
 
 function getHatBlock(scope: Scope, block: blockBlock, definition: definition, blockse: Record<string, jsonBlock>, level: number = 0): string {
@@ -660,12 +696,14 @@ for (const target of projectJson.targets) {
 		scope.stage = target.isStage
 		scope.spriteVariables = target.variables
 		scope.lists = Object.fromEntries(
-			Object.entries(target.lists as any).map(([id, list]) => {
-				console.log(id, list)
+			Object.entries(target.lists as Record<string, [string, ...string[]]>).map(([id, list]) => {
+				// console.log(id, list)
 				return [id, list[0]];
 			})
 		)
-		console.log(scope.lists)
+		if (target.isStage)
+			scope.global_lists = scope.lists;
+		// console.log(scope.lists)
 		let code = `#include <"blocks/js" "base.js">`;
 		for (const id of Object.keys(target.variables)) {
 			const variable = target.variables[id];
