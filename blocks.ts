@@ -1,7 +1,8 @@
 // deno-lint-ignore-file no-explicit-any
 export interface Input {
     name: string,
-    type: number
+    type: number,
+    variableTypes?: string[]
 }
 const blocksDir = 'pm-blocks'
 

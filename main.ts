@@ -57,6 +57,10 @@ class Scope {
 	vars: Record<string, string> = {};
 	lists: Record<string, string> = {};
 	global_lists: Record<string, string> = {};
+
+	// name to name
+	var_name_map: Record<string, string> = {};
+	list_name_map: Record<string, string> = {};
 	// id to name,
 	customBlockArgs: Record<string, string> = {}
 	spriteVariables: {
@@ -356,8 +360,21 @@ async function importDefaultExtension(id: string) {
 	}
 }
 
-function sanitizeVar(varname: string) {
-	return varname.replaceAll(/[^A-z0-9_#]/g, '_').replaceAll('\\','_')
+function sanitizeVar(varname: string, list?: boolean) {
+	const name_map = list ? scope.list_name_map : scope.var_name_map
+	if (name_map[varname])
+		return name_map[varname];
+	let name = varname.replaceAll(/[^A-z0-9_#]/g, '_').replaceAll('\\','_');
+	while ([
+		...Object.values(scope.var_name_map),
+		...Object.values(scope.list_name_map)
+	].includes(name))
+		name = '_'+name;
+	name_map[varname] = name;
+	return name;
+}
+function sanitizeList(varname: string) {
+	return sanitizeVar(varname, true)
 }
 
 function stringifyInputs(scope: Scope, block: blockBlock, definition: definition, blockse: Record<string, jsonBlock>, joiner?: string): string {
@@ -369,7 +386,12 @@ function stringifyInputs(scope: Scope, block: blockBlock, definition: definition
 			continue;
 		const inputData = block.inputs[input.name];
 		if (!inputData && block.fields[input.name]) {
-			result.push(`"${String(block.fields[input.name][0]).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
+			// console.log(block.fields, input)
+			result.push(`"${
+				(input.variableTypes?.includes('list') ? sanitizeList : sanitizeVar)
+				(String(block.fields[input.name][0]))
+				.replaceAll('\\', '\\\\').replaceAll('"', '\\"')
+			}"`)
 			continue;
 		}
 		if (!inputData) {
@@ -508,7 +530,7 @@ function getReporterBlock(
 			if (block.fields.VARIABLE[0] === undefined){
 				console.log(block.fields, block)
 			}
-			return doNext(`${_pre}${sanitizeVar(block.fields.VARIABLE[0])} = ${sanitizeVar(block.fields.VARIABLE[0])} + (${stringifyInputs(scope, block, [[{name: 'VALUE', type: 1}], 'reporter'], blockse)})`)
+			return doNext(`${_pre}${sanitizeVar(block.fields.VARIABLE[0])} += (${stringifyInputs(scope, block, [[{name: 'VALUE', type: 1}], 'reporter'], blockse)})`)
 		
 		case 'sensing_keyoptions':
 			return doNext(`"${(Object.values(block.fields) as [string, ...any[]][])[0][0].replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`);
@@ -539,6 +561,31 @@ function getReporterBlock(
 					{name:'OPERAND2',type:1}
 				],'reporter'
 			], blockse, ` ${operator[block.opcode]} `)}`)
+		
+		case 'operator_not':
+			return doNext(`!${stringifyInputs(scope, block, definition!, blockse)}`);
+		
+		case 'operator_letter_of':
+		case 'operator_join':
+			const thingy_tabler: Record<string, string> = {
+				operator_join: 'join',
+				operator_letter_of: 'letter',
+			}
+			return doNext(`${stringifyInputs(scope, block, definition!, blockse, `::${thingy_tabler[block.opcode]!}(`)})`);
+		
+		case 'operator_length':
+			const thingy_tablr: Record<string, string> = {
+				operator_length: 'length',
+			}
+			return doNext(`${stringifyInputs(scope, block, definition!, blockse)}::${thingy_tablr[block.opcode]}()`);
+		
+		case 'data_lengthoflist':
+			// im running out of variable names
+			const meowmeowmeowmeow: Record<string, string> = {
+				data_lengthoflist: 'length',
+			}
+			return doNext(`${block.fields.LIST![0]}::${meowmeowmeowmeow[block.opcode]}`);
+		
 		// case 'control_if':
 		// 	return doNext(
 		// 		getBranchBlock(scope, block, definition as [Input[], "branch", string[]], blockse, 0)
@@ -751,7 +798,7 @@ for (const target of projectJson.targets) {
 			const list = target.lists![id];
 			// console.debug('making fake block for initializaiton of variable', id, variable)
 			const value = list[1] ?? 0;
-			code += `\n${scope.stage ? 'global ' : ''}list ${sanitizeVar(list[0] ?? (()=>{throw'a'})())} = {${
+			code += `\n${scope.stage ? 'global ' : ''}list ${sanitizeList(list[0]!)} = {${
 				value && value.length > 0 ? value.map(i => {
 					return '\n\t'+(typeof i == 'number' ? i.toString() :
 						typeof i == 'boolean' ? (i ? 'true' : 'false') :
