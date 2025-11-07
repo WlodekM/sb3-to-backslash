@@ -362,6 +362,7 @@ async function importDefaultExtension(id: string) {
 
 function sanitizeVar(varname: string, list?: boolean) {
 	const name_map = list ? scope.list_name_map : scope.var_name_map
+	// console.log(varname, name_map)
 	if (name_map[varname])
 		return name_map[varname];
 	let name = varname.replaceAll(/[^A-z0-9_#]/g, '_').replaceAll('\\','_');
@@ -584,7 +585,7 @@ function getReporterBlock(
 			const meowmeowmeowmeow: Record<string, string> = {
 				data_lengthoflist: 'length',
 			}
-			return doNext(`${block.fields.LIST![0]}::${meowmeowmeowmeow[block.opcode]}`);
+			return doNext(`${sanitizeList(block.fields.LIST![0])}::${meowmeowmeowmeow[block.opcode]}`);
 		
 		// case 'control_if':
 		// 	return doNext(
@@ -752,6 +753,18 @@ for (const target of projectJson.targets) {
 			scope.global_lists = scope.lists;
 		// console.log(scope.lists)
 		let code = `#include <"blocks/js" "base.js">`;
+		for (const id of Object.keys(target.lists ?? {})) {
+			const list = target.lists![id];
+			// console.debug('making fake block for initializaiton of variable', id, variable)
+			const value = list[1] ?? 0;
+			code += `\n${scope.stage ? 'global ' : ''}list ${sanitizeList(list[0]!)} = {${
+				value && value.length > 0 ? value.map(i => {
+					return '\n\t'+(typeof i == 'number' ? i.toString() :
+						typeof i == 'boolean' ? (i ? 'true' : 'false') :
+						`"${String(i).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
+				}).join(',')+'\n' : ' '
+			}}`
+		}
 		for (const id of Object.keys(target.variables)) {
 			const variable = target.variables[id];
 			if (!variable || variable.length == 0)
@@ -765,7 +778,7 @@ for (const target of projectJson.targets) {
 			// )
 			// 	name += '_';
 			if (variable[0])
-				variable[0] = sanitize(variable[0])
+				variable[0] = sanitizeVar(variable[0])
 			code += '\n'+getReporterBlock(
 				scope,
 				{
@@ -793,18 +806,6 @@ for (const target of projectJson.targets) {
 				false,
 				true
 			)
-		}
-		for (const id of Object.keys(target.lists ?? {})) {
-			const list = target.lists![id];
-			// console.debug('making fake block for initializaiton of variable', id, variable)
-			const value = list[1] ?? 0;
-			code += `\n${scope.stage ? 'global ' : ''}list ${sanitizeList(list[0]!)} = {${
-				value && value.length > 0 ? value.map(i => {
-					return '\n\t'+(typeof i == 'number' ? i.toString() :
-						typeof i == 'boolean' ? (i ? 'true' : 'false') :
-						`"${String(i).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)
-				}).join(',')+'\n' : ' '
-			}}`
 		}
 		if (scope.stage) {
 			for (const extId of (projectJson.extensions ?? [])) {
@@ -869,7 +870,7 @@ for (const target of projectJson.targets) {
 		fs.mkdirSync(`out/src/${dirname}/assets/sounds`, {recursive:true})
 		Deno.writeTextFileSync(`out/src/${dirname}/code.bsl`, code)
 		/*projectConfig.sprites[i.toString()] =*/const config = {
-			code: `src/${dirname}/code.bsl`,
+			code: `code.bsl`,
 			costumes: Object.fromEntries(
 				Object.entries(target.costumes)
 					.map<[string, TCostume]>( ([n, c]) => {
@@ -879,7 +880,7 @@ for (const target of projectJson.targets) {
 						)
 						return [c.name, {
 							format: c.dataFormat,
-							path: `src/${dirname}/assets/costumes/${c.name.replaceAll('/','_')}.${c.dataFormat}`,
+							path: `assets/costumes/${c.name.replaceAll('/','_')}.${c.dataFormat}`,
 							...(
 								c.rotationCenterX && c.rotationCenterY ? 
 								{rotationCenter: [c.rotationCenterX, c.rotationCenterY]} :
@@ -898,7 +899,7 @@ for (const target of projectJson.targets) {
 						)
 						return [c.name, {
 							format: c.dataFormat,
-							path: `src/${dirname}/assets/sounds/${c.name.replaceAll('/','_')}.${c.dataFormat}`
+							path: `assets/sounds/${c.name.replaceAll('/','_')}.${c.dataFormat}`
 						}]
 					})
 			),
