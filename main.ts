@@ -556,15 +556,10 @@ function getReporterBlock(
 				operator_multiply: '*',
 				operator_divide: '/'
 			}
-			return doNext(`${stringifyInputs(scope, block, [
-				[
-					{name:'OPERAND1',type:1},
-					{name:'OPERAND2',type:1}
-				],'reporter'
-			], blockse, ` ${operator[block.opcode]} `)}`)
+			return doNext(`${stringifyInputs(scope, block, definition, blockse, ` ${operator[block.opcode]} `)}`)
 		
 		case 'operator_not':
-			return doNext(`!${stringifyInputs(scope, block, definition!, blockse)}`);
+			return doNext(`!(${stringifyInputs(scope, block, definition!, blockse)})`);
 		
 		case 'operator_letter_of':
 		case 'operator_join':
@@ -777,8 +772,11 @@ for (const target of projectJson.targets) {
 			// 	.some(b => b.name == name)
 			// )
 			// 	name += '_';
-			if (variable[0])
-				variable[0] = sanitizeVar(variable[0])
+			// unnecessary, done by getReporterBlock
+			// console.log(variable[0])
+			// if (variable[0])
+			// 	variable[0] = sanitizeVar(variable[0])
+			// console.log(variable[0])
 			code += '\n'+getReporterBlock(
 				scope,
 				{
